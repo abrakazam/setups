@@ -1,5 +1,5 @@
 # setups
-wget https://github.com/abrakazam/setups/blob/master/openvpn-install.sh
+wget https://raw.githubusercontent.com/abrakazam/setups/master/openvpn-install.sh
 
 chmod +x openvpn-install.sh
 
