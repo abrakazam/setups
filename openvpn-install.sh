@@ -5,7 +5,7 @@ OS="unsupported"
 if [[ "$EUID" -ne 0 ]]; then echo "Sorry, you need to run this as root";exit 1; fi
 if [[ ! -e /dev/net/tun ]]; then echo "TUN is not available";exit 2; fi
 if grep -qs "CentOS Linux release 7" "/etc/redhat-release"; then echo "CentOS 7 Supported";OS="centos";fi
-if grep -qs "CentOS Linux release 6" "/etc/redhat-release"; then echo "CentOS 6 Supported";OS="centos";fi
+if grep -qs "CentOS release 6" "/etc/redhat-release"; then echo "CentOS 6 Supported";OS="centos";fi
 
 if [[ "$OS" = 'centos' ]]; then
 SERVER_CN="cn_$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)"
