@@ -5,7 +5,8 @@ if [[ "$EUID" -ne 0 ]]; then echo "Sorry, you need to run this as root";exit 1; 
 if [[ ! -e /dev/net/tun ]]; then echo "TUN is not available";exit 2; fi
 if grep -qs "CentOS Linux release 7" "/etc/redhat-release"; then echo "CentOS 7 Supported";OS="centos";fi
 if grep -qs "CentOS release 6" "/etc/redhat-release"; then echo "CentOS 6 Supported";OS="centos";fi
-if grep -qs "^8." "/etc/debian_version"; then echo "Debian 8 Supported";OS="debian";fi
+if grep -qs "^8." "/etc/debian_version"; then echo "Debian 8 Supported";OS="debian";echo "deb http://build.openvpn.net/debian/openvpn/stable wheezy main" > /etc/apt/sources.list.d/openvpn.list;fi
+if grep -qs "^7." "/etc/debian_version"; then echo "Debian 7 Supported";OS="debian";echo "deb http://build.openvpn.net/debian/openvpn/stable jessie main" > /etc/apt/sources.list.d/openvpn.list;fi
 if [[ "$OS" = 'unsupported' ]]; then echo "unsupported OS";exit;fi
 
 read -p "Port: " -e -i 443 PORT
@@ -17,6 +18,8 @@ if [[ "$OS" = 'centos' ]]; then
 	yum install epel-release -y
 	yum install openvpn iptables openssl wget ca-certificates -y
 elif [[ "$OS" = 'debian' ]]; then 
+	wget -O - https://swupdate.openvpn.net/repos/repo-public.gpg | apt-key add -
+	apt-get update
 	apt-get install openvpn iptables openssl wget ca-certificates -y
 fi
 
