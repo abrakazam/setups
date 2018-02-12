@@ -1,17 +1,32 @@
 #!/bin/bash
 
-PORT=10749
 OS="unsupported"
 if [[ "$EUID" -ne 0 ]]; then echo "Sorry, you need to run this as root";exit 1; fi
 if [[ ! -e /dev/net/tun ]]; then echo "TUN is not available";exit 2; fi
 if grep -qs "CentOS Linux release 7" "/etc/redhat-release"; then echo "CentOS 7 Supported";OS="centos";fi
 if grep -qs "CentOS release 6" "/etc/redhat-release"; then echo "CentOS 6 Supported";OS="centos";fi
+if grep -qs "^8." "/etc/debian_version"; then echo "Debian 8 Supported";OS="debian";fi
+if [[ "$OS" = 'unsupported' ]]; then echo "unsupported OS";exit;fi
 
-if [[ "$OS" = 'centos' ]]; then
-SERVER_CN="cn_$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)"
-SERVER_NAME="server_$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)"
-yum install epel-release -y
-yum install openvpn iptables openssl wget ca-certificates curl -y
+read -p "Port: " -e -i 443 PORT
+while [[ $PROTO != "upd" && $PROTO != "tcp" ]]; do
+	read -p "Protocol [upd/tcp]: " -e -i tcp PROTO
+done
+
+if [[ "$OS" = 'centos' ]]; then 
+	yum install epel-release -y
+	yum install openvpn iptables openssl wget ca-certificates -y
+elif [[ "$OS" = 'debian' ]]; then 
+	apt-get install openvpn iptables openssl wget ca-certificates -y
+fi
+
+#group that openvpn to be ran
+NOGROUP=nobody
+if grep -qs "^nogroup:" /etc/group; then NOGROUP=nogroup;fi
+
+
+SERVER_CN="cn_$(cat /dev/urandom | tr -dc 'A-Z0-9' | fold -w 8 | head -n 1)"
+SERVER_NAME="server_$(cat /dev/urandom | tr -dc 'A-Z0-9' | fold -w 8 | head -n 1)"
 rm -rf /etc/openvpn/easy-rsa/
 wget -O ~/EasyRSA-3.0.4.tgz https://github.com/OpenVPN/easy-rsa/releases/download/v3.0.4/EasyRSA-3.0.4.tgz
 tar xzf ~/EasyRSA-3.0.4.tgz -C ~/
@@ -28,12 +43,13 @@ openvpn --genkey --secret /etc/openvpn/tls-auth.key
 cp pki/ca.crt pki/private/ca.key pki/dh.pem pki/issued/$SERVER_NAME.crt pki/private/$SERVER_NAME.key /etc/openvpn/easy-rsa/pki/crl.pem /etc/openvpn
 chmod 644 /etc/openvpn/crl.pem
 
+#creating server config
 cat > /etc/openvpn/server.conf <<EOF
 port $PORT
-proto tcp
+proto $PROTO
 dev tun
 user nobody
-group nobody
+group $NOGROUP
 persist-key
 persist-tun
 keepalive 10 120
@@ -58,8 +74,30 @@ status openvpn.log
 verb 3
 EOF
 
+#Adding IPtables rules and forwarding
 NIC=$(ip -4 route ls | grep default | grep -Po '(?<=dev )(\S+)' | head -1)
 iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o $NIC -j MASQUERADE
+if pgrep firewalld; then
+	firewall-cmd --zone=public --add-port=$PORT/$PROTO
+	firewall-cmd --zone=trusted --add-source=10.8.0.0/24
+	firewall-cmd --permanent --zone=public --add-port=$PORT/$PROTO
+	firewall-cmd --permanent --zone=trusted --add-source=10.8.0.0/24
+fi
+if iptables -L -n | grep -qE 'REJECT|DROP'; then
+	# If iptables has at least one REJECT rule, we asume this is needed.
+	iptables -I INPUT -p $PROTO --dport $PORT -j ACCEPT
+	iptables -I FORWARD -s 10.8.0.0/24 -j ACCEPT
+	iptables -I FORWARD -m state --state RELATED,ESTABLISHED -j ACCEPT
+fi
+iptables-save
+
+echo 1 > /proc/sys/net/ipv4/ip_forward
+sed -i '/\<net.ipv4.ip_forward\>/c\net.ipv4.ip_forward=1' /etc/sysctl.conf
+if ! grep -q "\<net.ipv4.ip_forward\>" /etc/sysctl.conf; then
+	echo 'net.ipv4.ip_forward=1' >> /etc/sysctl.conf
+fi
+
+#restart OPENVPN
 if pgrep systemd-journal; then
 	systemctl restart openvpn@server.service
 	systemctl enable openvpn@server.service
@@ -67,11 +105,10 @@ else
 	service openvpn start
 	chkconfig openvpn on
 fi
-echo 1 > /proc/sys/net/ipv4/ip_forward
-sed -i '/\<net.ipv4.ip_forward\>/c\net.ipv4.ip_forward=1' /etc/sysctl.conf
+
 	
-#create a client
-CLIENT_NAME="client_$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 16 | head -n 1)"
+#create client config
+CLIENT_NAME="client_$(cat /dev/urandom | tr -dc 'A-Z0-9' | fold -w 8 | head -n 1)"
 ./easyrsa build-client-full $CLIENT_NAME nopass
 IP=$(wget -qO- ipv4.icanhazip.com)
 CA_Content=`cat /etc/openvpn/easy-rsa/pki/ca.crt`
@@ -79,9 +116,9 @@ CCERT_Content=`cat /etc/openvpn/easy-rsa/pki/issued/$CLIENT_NAME.crt`
 CKEY_Content=`cat /etc/openvpn/easy-rsa/pki/private/$CLIENT_NAME.key`
 TLSAUTH_Content=`cat /etc/openvpn/tls-auth.key`
 
-cat > /etc/openvpn/$CLIENT_NAME.ovpn <<EOF
+cat > /etc/openvpn/$CLIENT_NAME-$IP.ovpn <<EOF
 client
-proto tcp-client
+proto $PROTO-client
 remote $IP $PORT
 dev tun
 resolv-retry infinite
@@ -112,5 +149,3 @@ key-direction 1
 $TLSAUTH_Content
 </tls-auth>
 EOF
-
-fi
