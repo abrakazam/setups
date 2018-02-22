@@ -10,8 +10,8 @@ if grep -qs "^7." "/etc/debian_version"; then echo "Debian 7 Supported";OS="debi
 if [[ "$OS" = 'unsupported' ]]; then echo "unsupported OS";exit;fi
 
 read -p "Port: " -e -i 443 PORT
-while [[ $PROTO != "upd" && $PROTO != "tcp" ]]; do
-	read -p "Protocol [upd/tcp]: " -e -i tcp PROTO
+while [[ $PROTO != "udp" && $PROTO != "tcp" ]]; do
+	read -p "Protocol [udp/tcp]: " -e -i tcp PROTO
 done
 
 if [[ "$OS" = 'centos' ]]; then 
@@ -121,7 +121,7 @@ TLSAUTH_Content=`cat /etc/openvpn/tls-auth.key`
 
 cat > /etc/openvpn/$CLIENT_NAME-$IP.ovpn <<EOF
 client
-proto $PROTO-client
+proto $PROTO
 remote $IP $PORT
 dev tun
 resolv-retry infinite
